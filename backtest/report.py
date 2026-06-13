@@ -150,6 +150,8 @@ def main() -> None:
                         help="More trades (3/4 conditions) + moderate 5x dynamic leverage, 2% risk")
     parser.add_argument("--strategy", choices=["pullback", "breakout", "ichimoku", "meanrev"],
                         default=None, help="strategy style to backtest")
+    parser.add_argument("--data-exchange", default=None,
+                        help="venue for historical data (default binance; kraken is limited to ~720 candles)")
     args = parser.parse_args()
 
     if args.strategy:
@@ -166,7 +168,8 @@ def main() -> None:
 
     logger = TradingLogger(CONFIG.log_dir, "backtest.log", "backtest_trades.jsonl")
     logger.info("Fetching %d months of history for %s …", args.months, CONFIG.pairs)
-    history = fetch_history(CONFIG, months=args.months, logger=logger, use_cache=not args.no_cache)
+    history = fetch_history(CONFIG, months=args.months, logger=logger,
+                            use_cache=not args.no_cache, data_exchange=args.data_exchange)
 
     bt = Backtester(CONFIG)
     results = bt.run_all(history)
