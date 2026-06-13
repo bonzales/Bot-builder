@@ -262,6 +262,50 @@ class IchimokuStrategy:
         return None
 
 
+class MeanReversionStrategy:
+    """
+    Oversold-bounce (mean reversion), LONG only. Enter only if ALL three hold:
+      * RSI(14) below `meanrev_rsi_max` (oversold)
+      * MACD bullish crossover (momentum turning up)
+      * volume > (1 + meanrev_vol_increase) x average of the last N candles
+    Exits use the standard dynamic management (ATR stop + TP1 + breakeven +
+    trailing) so winners are left to run.
+    """
+    def __init__(self, cfg) -> None:
+        self.cfg = cfg
+
+    @property
+    def name(self) -> str:
+        return "MeanReversion(RSI+MACD+Vol)"
+
+    def evaluate(self, pair, df_1h, rsi_15m=None):
+        cfg = self.cfg
+        min_len = max(cfg.macd_slow, cfg.rsi_period, cfg.meanrev_vol_lookback) + 2
+        if len(df_1h) < min_len:
+            return None
+        last = df_1h.iloc[-1]
+        atr_val = float(last["atr"])
+        price = float(last["close"])
+        rsi_val = last.get("rsi")
+        vol_avg6 = last.get("vol_avg6")
+        if pd.isna(atr_val) or atr_val <= 0 or pd.isna(rsi_val) or pd.isna(vol_avg6) or vol_avg6 <= 0:
+            return None
+
+        # "MACD crossover rialzista — il momentum sta girando": interpreted as
+        # bullish momentum (MACD above signal) via macd_mode so it can coincide
+        # with an oversold RSI. macd_mode="cross" restores the strict crossover.
+        macd_mode = getattr(cfg, "macd_mode", "state")
+        rsi_ok = rsi_val < cfg.meanrev_rsi_max
+        macd_ok = _macd_bullish(df_1h, macd_mode)
+        vol_ok = last["volume"] > (1.0 + cfg.meanrev_vol_increase) * vol_avg6
+        if rsi_ok and macd_ok and vol_ok:
+            sig = Signal(pair=pair, side=LONG, price=price, atr=atr_val, rsi=float(rsi_val),
+                         reasons=["rsi_oversold", "macd_bull_cross", "volume+25%"])
+            sig.strategy_label = self.name
+            return sig
+        return None
+
+
 def make_strategy(cfg):
     """Factory: pick the strategy implementation from cfg.strategy_type."""
     stype = getattr(cfg, "strategy_type", "pullback")
@@ -269,4 +313,6 @@ def make_strategy(cfg):
         return BreakoutStrategy(cfg)
     if stype == "ichimoku":
         return IchimokuStrategy(cfg)
+    if stype == "meanrev":
+        return MeanReversionStrategy(cfg)
     return Strategy(cfg)
