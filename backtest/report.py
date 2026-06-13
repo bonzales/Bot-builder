@@ -148,7 +148,13 @@ def main() -> None:
                         help="HIGH-RISK preset: all-in, fixed 10x leverage, wide stop")
     parser.add_argument("--active", action="store_true",
                         help="More trades (3/4 conditions) + moderate 5x dynamic leverage, 2% risk")
+    parser.add_argument("--strategy", choices=["pullback", "breakout", "ichimoku"],
+                        default=None, help="strategy style to backtest")
     args = parser.parse_args()
+
+    if args.strategy:
+        CONFIG.strategy_type = args.strategy
+        print(f"📐 Strategia: {args.strategy}\n")
 
     if args.aggressive:
         apply_aggressive_preset(CONFIG)

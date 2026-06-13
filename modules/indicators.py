@@ -79,6 +79,32 @@ def obv(df: pd.DataFrame) -> pd.Series:
     return (direction * volume).cumsum()
 
 
+def donchian(df: pd.DataFrame, period: int):
+    """
+    Prior-N-bar high/low channel (shifted by 1 so the current bar is excluded —
+    a breakout means the current close exceeds the previous N bars' extreme).
+    Returns (prior_high, prior_low).
+    """
+    prior_high = df["high"].rolling(period).max().shift(1)
+    prior_low = df["low"].rolling(period).min().shift(1)
+    return prior_high, prior_low
+
+
+def ichimoku(df: pd.DataFrame, tenkan: int = 9, kijun: int = 26,
+             senkou_b: int = 52, shift: int = 26):
+    """
+    Ichimoku Kinko Hyo lines. Senkou spans are shifted FORWARD by `shift`, so
+    the value at a given bar is derived from past data only (no look-ahead).
+    Returns (tenkan_sen, kijun_sen, senkou_a, senkou_b_line).
+    """
+    high, low = df["high"], df["low"]
+    tenkan_sen = (high.rolling(tenkan).max() + low.rolling(tenkan).min()) / 2
+    kijun_sen = (high.rolling(kijun).max() + low.rolling(kijun).min()) / 2
+    senkou_a = ((tenkan_sen + kijun_sen) / 2).shift(shift)
+    senkou_b_line = ((high.rolling(senkou_b).max() + low.rolling(senkou_b).min()) / 2).shift(shift)
+    return tenkan_sen, kijun_sen, senkou_a, senkou_b_line
+
+
 def add_all_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     """
     Enrich a 1h OHLCV frame with all indicators used by the strategy.
@@ -97,6 +123,23 @@ def add_all_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     out["atr"] = atr(out, cfg.atr_period)
     out["obv"] = obv(out)
     out["vol_avg"] = out["volume"].rolling(cfg.volume_avg_period).mean()
+
+    # Breakout (Donchian) channel
+    out["donchian_high"], out["donchian_low"] = donchian(
+        out, getattr(cfg, "donchian_period", 20)
+    )
+    # Ichimoku lines
+    tenkan, kijun, senkou_a, senkou_b_line = ichimoku(
+        out,
+        getattr(cfg, "ichimoku_tenkan", 9),
+        getattr(cfg, "ichimoku_kijun", 26),
+        getattr(cfg, "ichimoku_senkou_b", 52),
+        getattr(cfg, "ichimoku_shift", 26),
+    )
+    out["tenkan"] = tenkan
+    out["kijun"] = kijun
+    out["senkou_a"] = senkou_a
+    out["senkou_b"] = senkou_b_line
     return out
 
 

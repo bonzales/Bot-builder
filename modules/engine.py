@@ -24,7 +24,7 @@ import pandas as pd
 from . import telegram_bot as tg
 from .indicators import add_all_indicators, compute_rsi_secondary
 from .risk_manager import Position, RiskManager
-from .strategy import LONG, Strategy
+from .strategy import LONG, make_strategy
 
 
 def _utcnow() -> datetime:
@@ -41,7 +41,7 @@ class TradingEngine:
         self.order_manager = order_manager
         self.telegram = telegram_bot
         self.paper = paper
-        self.strategy = Strategy(cfg)
+        self.strategy = make_strategy(cfg)
         self.risk = RiskManager(cfg)
         self.open_positions: Dict[str, Position] = {}
         self.paused = False

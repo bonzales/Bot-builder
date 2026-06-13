@@ -169,6 +169,28 @@ def test_daily_loss_limit():
     assert not can and reason == "daily_loss_limit"
 
 
+def test_strategy_factory_types():
+    from modules.strategy import (
+        BreakoutStrategy, IchimokuStrategy, Strategy, make_strategy,
+    )
+    cfg = Config()
+    assert isinstance(make_strategy(cfg), Strategy)
+    cfg.strategy_type = "breakout"
+    assert isinstance(make_strategy(cfg), BreakoutStrategy)
+    cfg.strategy_type = "ichimoku"
+    assert isinstance(make_strategy(cfg), IchimokuStrategy)
+
+
+def test_breakout_long_signal():
+    from modules.strategy import BreakoutStrategy
+    cfg = Config()
+    # steady uptrend: last close breaks above the prior-20-bar high.
+    prices = list(np.linspace(100, 160, 80))
+    df = indicators.add_all_indicators(_make_df(prices), cfg)
+    sig = BreakoutStrategy(cfg).evaluate("BTC/EUR", df)
+    assert sig is not None and sig.side == LONG
+
+
 def _run_all():
     fns = [v for k, v in globals().items() if k.startswith("test_") and callable(v)]
     passed = 0

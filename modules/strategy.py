@@ -171,3 +171,102 @@ class Strategy:
                 )
 
         return None
+
+
+class BreakoutStrategy:
+    """
+    Trend-following breakout (Donchian). Crypto trends strongly, so 'buy the
+    breakout and ride it' is one of the more robust styles:
+      LONG  : close breaks above the prior-N-bar high, with EMA uptrend.
+      SHORT : close breaks below the prior-N-bar low, with EMA downtrend.
+    Same ATR stop / TP1 / trailing / leverage machinery as the other strategies.
+    """
+    def __init__(self, cfg) -> None:
+        self.cfg = cfg
+
+    @property
+    def name(self) -> str:
+        return "Breakout(Donchian)+EMA"
+
+    def evaluate(self, pair, df_1h, rsi_15m=None):
+        cfg = self.cfg
+        min_len = max(getattr(cfg, "donchian_period", 20), cfg.ema_slow, cfg.atr_period) + 2
+        if len(df_1h) < min_len:
+            return None
+        last = df_1h.iloc[-1]
+        atr_val = float(last["atr"])
+        price = float(last["close"])
+        if pd.isna(atr_val) or atr_val <= 0 or pd.isna(last.get("donchian_high")):
+            return None
+        if volume_spike(df_1h, cfg.volume_spike_mult):
+            return None
+
+        use_trend = getattr(cfg, "breakout_trend_filter", True)
+        trend_up = (last["ema_fast"] > last["ema_slow"]) or not use_trend
+        trend_down = (last["ema_fast"] < last["ema_slow"]) or not use_trend
+
+        if price > float(last["donchian_high"]) and trend_up:
+            sig = Signal(pair=pair, side=LONG, price=price, atr=atr_val, rsi=50.0,
+                         reasons=["breakout_high", "ema_up"])
+            sig.strategy_label = self.name
+            return sig
+        if cfg.allow_short and price < float(last["donchian_low"]) and trend_down:
+            sig = Signal(pair=pair, side=SHORT, price=price, atr=atr_val, rsi=50.0,
+                         reasons=["breakout_low", "ema_down"])
+            sig.strategy_label = self.name
+            return sig
+        return None
+
+
+class IchimokuStrategy:
+    """
+    Ichimoku trend system (multiday-style on 1h):
+      LONG  : price above the cloud (max of Senkou A/B) AND Tenkan > Kijun.
+      SHORT : price below the cloud (min of Senkou A/B) AND Tenkan < Kijun.
+    """
+    def __init__(self, cfg) -> None:
+        self.cfg = cfg
+
+    @property
+    def name(self) -> str:
+        return "Ichimoku"
+
+    def evaluate(self, pair, df_1h, rsi_15m=None):
+        cfg = self.cfg
+        min_len = getattr(cfg, "ichimoku_senkou_b", 52) + getattr(cfg, "ichimoku_shift", 26) + 2
+        if len(df_1h) < min_len:
+            return None
+        last = df_1h.iloc[-1]
+        atr_val = float(last["atr"])
+        price = float(last["close"])
+        for col in ("tenkan", "kijun", "senkou_a", "senkou_b"):
+            if pd.isna(last.get(col)):
+                return None
+        if pd.isna(atr_val) or atr_val <= 0:
+            return None
+        if volume_spike(df_1h, cfg.volume_spike_mult):
+            return None
+
+        cloud_top = max(last["senkou_a"], last["senkou_b"])
+        cloud_bot = min(last["senkou_a"], last["senkou_b"])
+        if price > cloud_top and last["tenkan"] > last["kijun"]:
+            sig = Signal(pair=pair, side=LONG, price=price, atr=atr_val, rsi=50.0,
+                         reasons=["above_cloud", "tenkan>kijun"])
+            sig.strategy_label = self.name
+            return sig
+        if cfg.allow_short and price < cloud_bot and last["tenkan"] < last["kijun"]:
+            sig = Signal(pair=pair, side=SHORT, price=price, atr=atr_val, rsi=50.0,
+                         reasons=["below_cloud", "tenkan<kijun"])
+            sig.strategy_label = self.name
+            return sig
+        return None
+
+
+def make_strategy(cfg):
+    """Factory: pick the strategy implementation from cfg.strategy_type."""
+    stype = getattr(cfg, "strategy_type", "pullback")
+    if stype == "breakout":
+        return BreakoutStrategy(cfg)
+    if stype == "ichimoku":
+        return IchimokuStrategy(cfg)
+    return Strategy(cfg)
