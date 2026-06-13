@@ -24,7 +24,7 @@ import pandas as pd
 from modules.indicators import add_all_indicators, rsi as rsi_fn
 from modules.reporting import compute_metrics
 from modules.risk_manager import Position, RiskManager
-from modules.strategy import LONG, SHORT, Strategy
+from modules.strategy import LONG, SHORT, make_strategy
 
 
 @dataclass
@@ -54,7 +54,7 @@ def _align_rsi_to_1h(df_1h: pd.DataFrame, df_15m: pd.DataFrame, period: int) -> 
 class Backtester:
     def __init__(self, cfg) -> None:
         self.cfg = cfg
-        self.strategy = Strategy(cfg)
+        self.strategy = make_strategy(cfg)
 
     def run_pair(self, pair: str, df_1h: pd.DataFrame, df_15m: pd.DataFrame) -> BacktestResult:
         cfg = self.cfg
@@ -64,7 +64,9 @@ class Backtester:
         risk = RiskManager(cfg)
         result = BacktestResult(pair=pair)
         pos: Optional[Position] = None
-        warmup = max(cfg.ema_slow, cfg.macd_slow, cfg.atr_period) + 2
+        # Enough history for the slowest indicator (Ichimoku cloud = 52 + 26 shift).
+        warmup = max(cfg.ema_slow, cfg.macd_slow, cfg.atr_period,
+                     getattr(cfg, "ichimoku_senkou_b", 52) + getattr(cfg, "ichimoku_shift", 26)) + 2
 
         for i in range(warmup, len(df)):
             bar = df.iloc[i]

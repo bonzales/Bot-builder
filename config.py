@@ -90,6 +90,15 @@ class Config:
     # How many of the 4 entry conditions must hold (EMA trend always mandatory).
     # 4 = strict; 3 = looser -> more frequent trades.
     min_conditions: int = 4
+    # Strategy style: "pullback" (EMA+RSI+MACD+OBV, default), "breakout"
+    # (Donchian trend-following) or "ichimoku".
+    strategy_type: str = "pullback"
+    breakout_trend_filter: bool = True
+    donchian_period: int = 20
+    ichimoku_tenkan: int = 9
+    ichimoku_kijun: int = 26
+    ichimoku_senkou_b: int = 52
+    ichimoku_shift: int = 26
     volume_spike_mult: float = 3.0      # skip trade if volume > 300% of average
     volume_avg_period: int = 20
     allow_short: bool = True            # SHORT requires margin (see margin section)
@@ -168,6 +177,8 @@ class Config:
             "rsi_long_range": [self.rsi_long_min, self.rsi_long_max],
             "rsi_short_range": [self.rsi_short_min, self.rsi_short_max],
             "macd_mode": self.macd_mode,
+            "strategy_type": self.strategy_type,
+            "min_conditions": self.min_conditions,
             "macd": [self.macd_fast, self.macd_slow, self.macd_signal],
             "atr_period": self.atr_period,
             "atr_sl_multiplier": self.atr_sl_multiplier,
