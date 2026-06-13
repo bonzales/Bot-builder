@@ -56,12 +56,17 @@ def fmt_price(v: float) -> str:
 def trade_opened_msg(pos, sl_pct: float, tp1_price: float) -> str:
     direction = "LONG" if pos.side == "long" else "SHORT"
     ts = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    lev_line = (
+        f"Leva: {pos.leverage:g}x (margine) | Esposizione: {pos.notional:.2f}€\n"
+        if getattr(pos, "is_margin", False) else "Leva: 1x (spot)\n"
+    )
     return (
         "🟢 TRADE APERTO\n"
         f"Coppia: {pos.pair}\n"
         f"Direzione: {direction}\n"
         f"Prezzo entrata: {fmt_price(pos.entry_price)}€\n"
-        f"Dimensione: {pos.size_eur:.2f}€\n"
+        f"Margine impegnato: {pos.size_eur:.2f}€\n"
+        f"{lev_line}"
         f"Stop Loss: {fmt_price(pos.sl_price)}€ ({sl_pct:+.2%})\n"
         f"Take Profit 1: {fmt_price(tp1_price)}€ (+3%)\n"
         f"Strategia: {pos.strategy_name}\n"

@@ -73,6 +73,7 @@ def test_volume_spike_blocks():
 # -------------------------------------------------------------- risk manager
 def test_position_sizing_and_sl():
     cfg = Config()
+    cfg.use_margin = False  # pure spot: 1x, quantity == margin/price
     rm = RiskManager(cfg, starting_capital=100.0)
     assert rm.position_size_eur() == 33.0
 
@@ -83,10 +84,49 @@ def test_position_sizing_and_sl():
     # TP1 = +3%
     assert abs(pos.tp1_price - 103.0) < 1e-6
     assert abs(pos.quantity - 0.33) < 1e-6
+    assert pos.leverage == 1.0 and not pos.is_margin
+
+
+def test_dynamic_leverage_risk_targeted_and_capped():
+    cfg = Config()
+    rm = RiskManager(cfg, starting_capital=100.0)
+    # Wide stop (volatile): atr=10 -> stop_distance = 15% -> tiny leverage, clamped to min.
+    volatile = Signal(pair="BTC/EUR", side=LONG, price=100.0, atr=10.0, rsi=40.0)
+    assert rm.select_leverage(volatile) == max(cfg.min_leverage, round(
+        cfg.risk_per_trade_pct / (cfg.position_pct * 0.15), 2))
+
+    # Tight stop (calm): atr tiny -> leverage would explode -> clamped to max.
+    calm = Signal(pair="BTC/EUR", side=LONG, price=100.0, atr=0.05, rsi=40.0)
+    assert rm.select_leverage(calm) == cfg.max_leverage
+
+    # Loss at stop must never exceed the risk target (within the cap).
+    sig = Signal(pair="ETH/EUR", side=LONG, price=100.0, atr=1.0, rsi=40.0)
+    pos = rm.build_position(sig, rm.position_size_eur())
+    stop_distance = abs(pos.entry_price - pos.sl_price)
+    loss_at_stop = stop_distance * pos.quantity  # notional-based loss
+    assert loss_at_stop <= cfg.risk_per_trade_pct * rm.capital + 1e-6
+
+
+def test_short_lifecycle_margin_with_fees():
+    cfg = Config()
+    rm = RiskManager(cfg, starting_capital=100.0)
+    sig = Signal(pair="BTC/EUR", side=SHORT, price=100.0, atr=2.0, rsi=60.0)
+    pos = rm.build_position(sig, rm.position_size_eur())
+    assert pos.is_margin and pos.leverage > 1.0
+    assert pos.kraken_leverage >= 2          # shorts require a margin tier
+    # SHORT SL above entry, TP1 below entry.
+    assert pos.sl_price > pos.entry_price and pos.tp1_price < pos.entry_price
+    # Hit TP1 (price drops 3%): partial close + breakeven.
+    actions = rm.evaluate_position(pos, 97.0)
+    assert any(a["type"] == "tp1" for a in actions)
+    fill = rm.register_partial_close(pos, 97.0, cfg.tp1_close_fraction)
+    assert fill["margin_fee"] > 0            # margin financing was charged
+    assert rm.capital > 100.0                # profitable short
 
 
 def test_three_phase_lifecycle_long():
     cfg = Config()
+    cfg.use_margin = False  # isolate the SL/TP mechanics from leverage/fees
     rm = RiskManager(cfg, starting_capital=100.0)
     sig = Signal(pair="BTC/EUR", side=LONG, price=100.0, atr=2.0, rsi=40.0)
     pos = rm.build_position(sig, 33.0)

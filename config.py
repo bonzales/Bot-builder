@@ -81,10 +81,10 @@ class Config:
     rsi_short_max: float = 65.0
     volume_spike_mult: float = 3.0      # skip trade if volume > 300% of average
     volume_avg_period: int = 20
-    allow_short: bool = True            # Kraken spot EUR pairs may not support shorting
+    allow_short: bool = True            # SHORT requires margin (see margin section)
 
     # ----- Risk management ----- #
-    position_pct: float = 0.33          # 33% of capital per trade -> up to 3 concurrent
+    position_pct: float = 0.33          # 33% of capital used as collateral/margin per trade
     max_concurrent_trades: int = 3
     atr_sl_multiplier: float = 1.5      # stop loss = entry -/+ ATR * mult
     tp1_pct: float = 0.03               # +3% -> partial close
@@ -93,7 +93,33 @@ class Config:
     trailing_trigger_pct: float = 0.01  # every +1% additional gain ...
     trailing_step_pct: float = 0.007    # ... raises SL by +0.7%
     daily_loss_limit_pct: float = 0.05  # -5% of capital -> pause until 00:00 UTC
-    leverage: int = 1                   # 1x until backtest validation
+
+    # ----- Margin & dynamic leverage -----
+    # SHORT and leveraged LONG run on Kraken margin. The bot does NOT use a
+    # fixed leverage: it picks one dynamically so that the loss if the ATR stop
+    # is hit stays at ~`risk_per_trade_pct` of capital. Calmer markets (tighter
+    # stop) -> higher leverage; volatile markets -> lower leverage. The result
+    # is clamped to [min_leverage, max_leverage].
+    use_margin: bool = True             # enable margin (required for shorting)
+    dynamic_leverage: bool = True       # choose leverage from volatility/risk
+    risk_per_trade_pct: float = 0.01    # target max loss per trade = 1% of capital
+    max_leverage: float = 3.0           # SELF-IMPOSED ceiling (Kraken allows more; do NOT raise lightly)
+    min_leverage: float = 1.0           # 1x effective == plain spot for longs
+    # Kraken margin financing costs (from the live order form): ~0.02% open,
+    # ~0.01% rollover every 4h. Modelled in the bot AND the backtest.
+    margin_open_fee: float = 0.0002
+    margin_rollover_fee: float = 0.0001
+    rollover_hours: int = 4
+    # Leverage tiers Kraken offers per pair (used to pick the API `leverage`
+    # param). Best-effort defaults; refreshed from the exchange when available.
+    kraken_leverage_tiers: dict = field(
+        default_factory=lambda: {
+            "BTC/EUR": [2, 3, 4, 5, 10],
+            "ETH/EUR": [2, 3, 4, 5],
+            "SOL/EUR": [2, 3],
+        }
+    )
+    default_leverage_tiers: list = field(default_factory=lambda: [2, 3])
 
     # ----- Order execution ----- #
     order_retry_attempts: int = 3
@@ -138,7 +164,14 @@ class Config:
             "trailing_trigger_pct": self.trailing_trigger_pct,
             "trailing_step_pct": self.trailing_step_pct,
             "daily_loss_limit_pct": self.daily_loss_limit_pct,
-            "leverage": self.leverage,
+            "allow_short": self.allow_short,
+            "use_margin": self.use_margin,
+            "dynamic_leverage": self.dynamic_leverage,
+            "risk_per_trade_pct": self.risk_per_trade_pct,
+            "max_leverage": self.max_leverage,
+            "min_leverage": self.min_leverage,
+            "margin_open_fee": self.margin_open_fee,
+            "margin_rollover_fee_4h": self.margin_rollover_fee,
             "taker_fee": self.taker_fee,
         }
 

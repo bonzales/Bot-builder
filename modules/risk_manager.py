@@ -18,6 +18,7 @@ Daily guards:
 
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -30,17 +31,37 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def pick_kraken_leverage(cfg, pair: str, side: str, effective_leverage: float) -> int:
+    """
+    Map a desired *effective* leverage to a Kraken-supported integer tier for
+    the API ``leverage`` param. We pick the smallest available tier >= the
+    needed leverage (>=2 for shorts, since they require margin). The effective
+    exposure/risk is governed by position notional + the ATR stop, not by this
+    tier — a higher tier only frees up margin, it does not increase our loss.
+    """
+    tiers = cfg.kraken_leverage_tiers.get(pair, cfg.default_leverage_tiers)
+    tiers = sorted(int(t) for t in tiers)
+    needed = max(2 if side == SHORT else 1, math.ceil(effective_leverage))
+    for t in tiers:
+        if t >= needed:
+            return t
+    return tiers[-1] if tiers else max(needed, 2)
+
+
 @dataclass
 class Position:
     pair: str
     side: str
     entry_price: float
     atr: float
-    size_eur: float            # notional allocated at entry
-    quantity: float            # base-asset units at entry
+    size_eur: float            # collateral/margin committed at entry (33% of capital)
+    quantity: float            # base-asset units at entry (== notional / entry)
     sl_price: float
     tp1_price: float
     initial_sl_price: float
+    leverage: float = 1.0          # effective leverage (notional / collateral)
+    kraken_leverage: int = 1       # tier sent to Kraken's API (>=2 for margin)
+    is_margin: bool = False        # margin position (short, or leveraged long)
     strategy_name: str = "EMA+RSI+MACD+OBV"
     phase: int = 1
     remaining_fraction: float = 1.0
@@ -64,6 +85,10 @@ class Position:
     def remaining_quantity(self) -> float:
         return self.quantity * self.remaining_fraction
 
+    @property
+    def notional(self) -> float:
+        return self.quantity * self.entry_price
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
@@ -76,6 +101,9 @@ class Position:
             "sl_price": self.sl_price,
             "tp1_price": self.tp1_price,
             "initial_sl_price": self.initial_sl_price,
+            "leverage": self.leverage,
+            "kraken_leverage": self.kraken_leverage,
+            "is_margin": self.is_margin,
             "phase": self.phase,
             "remaining_fraction": self.remaining_fraction,
             "realized_pnl_eur": self.realized_pnl_eur,
@@ -146,6 +174,32 @@ class RiskManager:
     def position_size_eur(self) -> float:
         return round(self.capital * self.cfg.position_pct, 2)
 
+    def select_leverage(self, signal) -> float:
+        """
+        Risk-based dynamic leverage. We want the loss if the ATR stop is hit to
+        be ~`risk_per_trade_pct` of capital:
+
+            loss_at_stop = stop_distance_pct * notional
+                         = stop_distance_pct * (position_pct * capital * L)
+            set == risk_per_trade_pct * capital
+            =>  L = risk_per_trade_pct / (position_pct * stop_distance_pct)
+
+        Tighter stop (calm market) -> higher L; wider stop (volatile) -> lower L.
+        Clamped to [min_leverage, max_leverage]. SHORT always uses margin.
+        """
+        cfg = self.cfg
+        if not cfg.use_margin:
+            return 1.0
+        if not cfg.dynamic_leverage:
+            return max(cfg.min_leverage, 1.0)
+        stop_distance_pct = (signal.atr * cfg.atr_sl_multiplier) / signal.price
+        if stop_distance_pct <= 0:
+            return cfg.min_leverage
+        lev = cfg.risk_per_trade_pct / (cfg.position_pct * stop_distance_pct)
+        lev = max(cfg.min_leverage, min(cfg.max_leverage, lev))
+        # A short can never be below 1x effective; it still needs margin.
+        return round(lev, 2)
+
     # ------------------------------------------------------------------ #
     # Building a position from a signal
     # ------------------------------------------------------------------ #
@@ -159,7 +213,16 @@ class RiskManager:
         else:
             sl = entry + atr_dist
             tp1 = entry * (1 - cfg.tp1_pct)
-        quantity = size_eur / entry if entry > 0 else 0.0
+
+        leverage = self.select_leverage(signal)
+        notional = size_eur * leverage
+        quantity = notional / entry if entry > 0 else 0.0
+        # Margin is needed for any short, or for a long with leverage > 1.
+        is_margin = cfg.use_margin and (signal.side == SHORT or leverage > 1.0)
+        kraken_leverage = (
+            pick_kraken_leverage(cfg, signal.pair, signal.side, leverage)
+            if is_margin else 1
+        )
         return Position(
             pair=signal.pair,
             side=signal.side,
@@ -170,6 +233,9 @@ class RiskManager:
             sl_price=sl,
             tp1_price=tp1,
             initial_sl_price=sl,
+            leverage=leverage,
+            kraken_leverage=kraken_leverage,
+            is_margin=is_margin,
             strategy_name=signal.strategy_name,
         )
 
@@ -253,23 +319,42 @@ class RiskManager:
             return (exit_price - pos.entry_price) * quantity
         return (pos.entry_price - exit_price) * quantity
 
-    def register_partial_close(self, pos: Position, exit_price: float, fraction: float) -> Dict:
+    def _margin_fee(self, pos: Position, qty: float, close_time: Optional[datetime]) -> float:
+        """Kraken margin financing: opening fee + rollover every N hours, on the
+        notional of the quantity being closed. Zero for plain spot positions."""
+        if not pos.is_margin:
+            return 0.0
+        notional = qty * pos.entry_price
+        close_time = close_time or _utcnow()
+        hours = max(0.0, (close_time - pos.opened_at).total_seconds() / 3600.0)
+        periods = math.ceil(hours / self.cfg.rollover_hours) if hours > 0 else 0
+        open_fee = notional * self.cfg.margin_open_fee
+        rollover = notional * self.cfg.margin_rollover_fee * periods
+        return open_fee + rollover
+
+    def register_partial_close(self, pos: Position, exit_price: float, fraction: float,
+                               close_time: Optional[datetime] = None) -> Dict:
         qty = pos.quantity * fraction
         gross = self._gross_pnl(pos, exit_price, qty)
-        fee = (pos.entry_price + exit_price) * qty * self.cfg.taker_fee
+        trade_fee = (pos.entry_price + exit_price) * qty * self.cfg.taker_fee
+        margin_fee = self._margin_fee(pos, qty, close_time)
+        fee = trade_fee + margin_fee
         net = gross - fee
         pos.remaining_fraction = round(pos.remaining_fraction - fraction, 6)
         pos.realized_pnl_eur += net
         pos.fees_paid += fee
         self.capital += net
         self.daily_realized_pnl += net
-        return {"gross": gross, "fee": fee, "net": net, "quantity": qty}
+        return {"gross": gross, "fee": fee, "margin_fee": margin_fee, "net": net, "quantity": qty}
 
-    def register_close(self, pos: Position, exit_price: float) -> Dict:
+    def register_close(self, pos: Position, exit_price: float,
+                       close_time: Optional[datetime] = None) -> Dict:
         fraction = pos.remaining_fraction
         qty = pos.quantity * fraction
         gross = self._gross_pnl(pos, exit_price, qty)
-        fee = (pos.entry_price + exit_price) * qty * self.cfg.taker_fee
+        trade_fee = (pos.entry_price + exit_price) * qty * self.cfg.taker_fee
+        margin_fee = self._margin_fee(pos, qty, close_time)
+        fee = trade_fee + margin_fee
         net = gross - fee
         pos.realized_pnl_eur += net
         pos.fees_paid += fee
@@ -282,6 +367,7 @@ class RiskManager:
         return {
             "gross": gross,
             "fee": fee,
+            "margin_fee": margin_fee,
             "net": net,
             "quantity": qty,
             "total_net": pos.realized_pnl_eur,

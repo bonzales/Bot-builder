@@ -63,16 +63,27 @@ class OrderManager:
         return "sell" if opening else "buy"
 
     # ------------------------------------------------------------------ #
+    def _margin_params(self, leverage: int, reduce_only: bool = False) -> Dict:
+        """Build ccxt order params for a Kraken margin order."""
+        params: Dict = {}
+        if leverage and leverage > 1:
+            params["leverage"] = int(leverage)
+            if reduce_only:
+                # Close against the existing margin position rather than open a new one.
+                params["reduce_only"] = True
+        return params
+
     def market_entry(self, pair: str, side: str, quantity: float, ref_price: float,
-                     reason: str) -> OrderResult:
+                     reason: str, leverage: int = 1) -> OrderResult:
         if self.paper:
             result = OrderResult(True, ref_price, quantity, order_id=f"paper-{int(time.time()*1000)}")
         else:
             ccxt_side = self._ccxt_side(side, opening=True)
+            params = self._margin_params(leverage)
 
             def _do():
                 return self.data_engine.exchange.create_order(
-                    pair, "market", ccxt_side, quantity
+                    pair, "market", ccxt_side, quantity, None, params
                 )
 
             order = self._with_retry(_do, f"market_entry {pair}")
@@ -82,7 +93,7 @@ class OrderManager:
         self.logger.log_event(
             "order_entry",
             {
-                "pair": pair, "side": side, "quantity": quantity,
+                "pair": pair, "side": side, "quantity": quantity, "leverage": leverage,
                 "price": result.price, "reason": reason, "paper": self.paper,
                 "order_id": result.order_id,
             },
@@ -90,15 +101,16 @@ class OrderManager:
         return result
 
     def market_exit(self, pair: str, side: str, quantity: float, ref_price: float,
-                    reason: str) -> OrderResult:
+                    reason: str, leverage: int = 1) -> OrderResult:
         if self.paper:
             result = OrderResult(True, ref_price, quantity, order_id=f"paper-{int(time.time()*1000)}")
         else:
             ccxt_side = self._ccxt_side(side, opening=False)
+            params = self._margin_params(leverage, reduce_only=True)
 
             def _do():
                 return self.data_engine.exchange.create_order(
-                    pair, "market", ccxt_side, quantity
+                    pair, "market", ccxt_side, quantity, None, params
                 )
 
             order = self._with_retry(_do, f"market_exit {pair}")
@@ -108,7 +120,7 @@ class OrderManager:
         self.logger.log_event(
             "order_exit",
             {
-                "pair": pair, "side": side, "quantity": quantity,
+                "pair": pair, "side": side, "quantity": quantity, "leverage": leverage,
                 "price": result.price, "reason": reason, "paper": self.paper,
                 "order_id": result.order_id,
             },

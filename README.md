@@ -48,6 +48,8 @@ the rest on 1h):
 | Confirmation | MACD bullish cross | MACD bearish cross |
 | Volume | OBV rising vs last 3 | OBV falling vs last 3 |
 
+SHORT trades use Kraken margin (see *Short & dynamic leverage* below).
+
 No trade if: daily loss limit hit, a position is already open on the pair, or
 volume spikes > 300% of average.
 
@@ -61,7 +63,27 @@ volume spikes > 300% of average.
 - **Phase 3 — Trailing (remaining 60%):** SL trails at 70% of peak gain
   (+4%→+2.8%, +5%→+3.5%, +6%→+4.2%), ratcheting only upward.
 - **Daily loss limit:** −5% of capital → pause until 00:00 UTC.
-- **Leverage:** 1x until backtest validation.
+
+### Short & dynamic leverage (margin)
+
+SHORT trades and leveraged LONGs run on **Kraken margin**. The bot does **not**
+use a fixed leverage: it picks one **dynamically from volatility** so the loss
+if the ATR stop is hit stays at ~**1% of capital** (`risk_per_trade_pct`):
+
+```
+leverage = risk_per_trade_pct / (position_pct × stop_distance_pct)   # clamped to [1x, 3x]
+```
+
+Calm market (tight stop) → higher leverage; volatile market → lower leverage,
+**at constant risk**. The ceiling is a self-imposed **3x** (`max_leverage`) —
+well below the 10x Kraken allows — and is editable in `config.py`. Margin
+financing costs (≈0.02% open + ≈0.01% rollover / 4h) are modelled in both the
+live bot and the backtest. Set `allow_short = False` / `use_margin = False` to
+revert to spot-only LONG.
+
+> ⚠️ Leverage amplifies losses too. Because exits are software-managed, a bot
+> outage during a sharp move is the main residual risk — systemd auto-restart
+> mitigates it; validate on small size before scaling.
 
 ## Setup
 

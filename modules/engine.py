@@ -132,7 +132,8 @@ class TradingEngine:
             fraction = action["close_fraction"]
             qty = pos.quantity * fraction
             res = self.order_manager.market_exit(
-                pos.pair, pos.side, qty, action["price"], reason="tp1_partial"
+                pos.pair, pos.side, qty, action["price"], reason="tp1_partial",
+                leverage=pos.kraken_leverage,
             )
             fill = self.risk.register_partial_close(pos, res.price, fraction)
             self.logger.log_event("tp1", {**pos.to_dict(), **fill, "fill_price": res.price})
@@ -150,7 +151,8 @@ class TradingEngine:
         elif kind == "stop_hit":
             qty = pos.remaining_quantity()
             res = self.order_manager.market_exit(
-                pos.pair, pos.side, qty, action["price"], reason="stop_loss"
+                pos.pair, pos.side, qty, action["price"], reason="stop_loss",
+                leverage=pos.kraken_leverage,
             )
             fill = self.risk.register_close(pos, res.price)
             self.logger.log_event(
@@ -208,13 +210,14 @@ class TradingEngine:
         size_eur = self.risk.position_size_eur()
         pos = self.risk.build_position(signal, size_eur)
         res = self.order_manager.market_entry(
-            pos.pair, pos.side, pos.quantity, pos.entry_price, reason=signal.strategy_name
+            pos.pair, pos.side, pos.quantity, pos.entry_price,
+            reason=signal.strategy_name, leverage=pos.kraken_leverage,
         )
-        # Use real fill price for live entries.
-        if res.price and res.price != pos.entry_price:
-            pos.entry_price = res.price
-            pos = self.risk.build_position(signal, size_eur)  # recompute SL/TP on fill
-            pos.entry_price = res.price
+        # Rebuild on the real fill price (live) so SL/TP/leverage/quantity stay
+        # consistent with where we actually got filled.
+        if res.price and abs(res.price - pos.entry_price) > 1e-12:
+            signal.price = res.price
+            pos = self.risk.build_position(signal, size_eur)
         self.open_positions[pos.pair] = pos
         self.logger.log_event("trade_opened", pos.to_dict())
         if self.telegram:

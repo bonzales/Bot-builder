@@ -87,6 +87,9 @@ class Backtester:
                     if can:
                         size = risk.position_size_eur()
                         pos = risk.build_position(signal, size)
+                        # Stamp the real bar time so margin financing fees use
+                        # the actual holding duration (not wall-clock now()).
+                        pos.opened_at = ts.to_pydatetime()
                         result.trades_opened = getattr(result, "trades_opened", 0) + 1
 
             # day rollover by date
@@ -96,30 +99,32 @@ class Backtester:
 
         # Close any dangling position at the last close.
         if pos is not None:
-            fill = risk.register_close(pos, float(df.iloc[-1]["close"]))
-            result.trades.append(self._trade_record(pos, df.iloc[-1]["close"], fill, df.iloc[-1]["datetime"]))
+            last_ts = df.iloc[-1]["datetime"]
+            fill = risk.register_close(pos, float(df.iloc[-1]["close"]), close_time=last_ts.to_pydatetime())
+            result.trades.append(self._trade_record(pos, df.iloc[-1]["close"], fill, last_ts))
 
         result.final_capital = risk.capital
         result.metrics = compute_metrics(result.trades)
         return result
 
     def _manage(self, risk, pos, adverse, favorable, result, ts) -> bool:
+        close_time = ts.to_pydatetime()
         # Stop check first (pessimistic).
         actions = risk.evaluate_position(pos, adverse)
         for action in actions:
             if action["type"] == "stop_hit":
-                fill = risk.register_close(pos, action["price"])
+                fill = risk.register_close(pos, action["price"], close_time=close_time)
                 result.trades.append(self._trade_record(pos, action["price"], fill, ts))
                 return True
             if action["type"] == "tp1":
-                fill = risk.register_partial_close(pos, action["price"], action["close_fraction"])
+                risk.register_partial_close(pos, action["price"], action["close_fraction"], close_time=close_time)
         # Favorable extreme: TP1 / trailing.
         actions = risk.evaluate_position(pos, favorable)
         for action in actions:
             if action["type"] == "tp1":
-                risk.register_partial_close(pos, action["price"], action["close_fraction"])
+                risk.register_partial_close(pos, action["price"], action["close_fraction"], close_time=close_time)
             elif action["type"] == "stop_hit":
-                fill = risk.register_close(pos, action["price"])
+                fill = risk.register_close(pos, action["price"], close_time=close_time)
                 result.trades.append(self._trade_record(pos, action["price"], fill, ts))
                 return True
         return False
