@@ -31,18 +31,23 @@ def ohlcv_to_df(raw: List[list]) -> pd.DataFrame:
 
 
 class DataEngine:
-    def __init__(self, cfg, logger=None, authenticated: bool = False) -> None:
+    def __init__(self, cfg, logger=None, authenticated: bool = False,
+                 exchange_id: str = None) -> None:
         self.cfg = cfg
         self.logger = logger
         if ccxt is None:
             raise RuntimeError("ccxt is not installed; run `pip install -r requirements.txt`")
 
+        # `exchange_id` lets the backtest pull history from a venue with deep
+        # history (e.g. Binance) while live trading stays on cfg.exchange_id.
+        ex_id = exchange_id or cfg.exchange_id
         params = {"enableRateLimit": True}
-        if authenticated and cfg.credentials.has_kraken:
+        if authenticated and ex_id == cfg.exchange_id and cfg.credentials.has_kraken:
             params["apiKey"] = cfg.credentials.kraken_api_key
             params["secret"] = cfg.credentials.kraken_api_secret
-        exchange_class = getattr(ccxt, cfg.exchange_id)
+        exchange_class = getattr(ccxt, ex_id)
         self.exchange = exchange_class(params)
+        self.exchange_id = ex_id
         self._markets_loaded = False
 
     def _ensure_markets(self) -> None:

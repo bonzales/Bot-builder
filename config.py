@@ -164,6 +164,11 @@ class Config:
     # ----- Backtest ----- #
     backtest_months: int = 12
     backtest_timeframe: str = "1h"
+    # Kraken's public OHLCV only returns ~720 recent candles (≈30 days on 1h),
+    # far too little for a 12-month backtest. So pull historical candles from a
+    # venue with deep history for backtesting; live trading stays on Kraken.
+    # Crypto prices track closely across venues; EUR pairs map to USDT here.
+    backtest_data_exchange: str = "binance"
 
     # ----- Credentials ----- #
     credentials: Credentials = field(default_factory=Credentials)
