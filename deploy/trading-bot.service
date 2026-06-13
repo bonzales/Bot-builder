@@ -1,0 +1,30 @@
+[Unit]
+Description=Autonomous Crypto Trading Bot (Kraken)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trader
+Group=trader
+WorkingDirectory=/opt/trading-bot
+EnvironmentFile=/opt/trading-bot/.env
+# Logs are written by the app to /var/log/trading-bot; LOG_DIR points there.
+Environment=LOG_DIR=/var/log/trading-bot
+Environment=BOT_MODE=live
+ExecStart=/opt/trading-bot/venv/bin/python /opt/trading-bot/main.py --mode live
+
+# Automatic restart on crash
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/var/log/trading-bot /opt/trading-bot
+
+[Install]
+WantedBy=multi-user.target

@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Trading bot runtime artifacts
+logs/
+/var/log/trading-bot/
+state.json
+backtest/data/
+backtest/reports/
+*.jsonl
