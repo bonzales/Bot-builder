@@ -188,7 +188,10 @@ def optimize(cfg, history: Dict[str, Dict[str, pd.DataFrame]], logger=None) -> L
     Grid-search the key parameters and rank combinations by net P&L.
     Returns a sorted list of {params, metrics} dicts (best first).
     """
-    atr_mults = [1.0, 1.5, 2.0]
+    # Include wider stops (2.5x, 3.0x) so we can see if giving trades more room
+    # to breathe helps. Note: a wider stop lowers risk-based leverage, keeping
+    # per-trade risk ~constant.
+    atr_mults = [1.0, 1.5, 2.0, 2.5, 3.0]
     # Broadened toward higher/wider bands: a strict <=50 cap on the long RSI
     # almost never coincides with an EMA uptrend, which starved the strategy.
     rsi_ranges = [(35, 50), (35, 55), (40, 60), (45, 65), (30, 50)]
