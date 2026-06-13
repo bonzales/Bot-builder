@@ -135,32 +135,39 @@ class Strategy:
         trend_up = last["ema_fast"] > last["ema_slow"]
         trend_down = last["ema_fast"] < last["ema_slow"]
         macd_mode = getattr(cfg, "macd_mode", "state")
+        # How many of the 4 conditions must hold. The EMA trend is always
+        # mandatory (it sets the direction); `min_conditions` then requires at
+        # least (min_conditions - 1) of the remaining three (RSI / MACD / OBV).
+        # 4 = strict (all), 3 = looser -> more trades.
+        min_conditions = int(getattr(cfg, "min_conditions", 4))
+        need_others = max(0, min_conditions - 1)
 
-        # ---- LONG ---- #
-        long_conditions = {
-            "ema20>ema50": bool(trend_up),
-            f"rsi {cfg.rsi_long_min}-{cfg.rsi_long_max}": cfg.rsi_long_min <= rsi_val <= cfg.rsi_long_max,
-            f"macd_bull_{macd_mode}": _macd_bullish(df_1h, macd_mode),
-            "obv_rising": _obv_rising(df_1h, cfg.obv_lookback),
-        }
-        if all(long_conditions.values()):
-            return Signal(
-                pair=pair, side=LONG, price=price, atr=atr_val, rsi=rsi_val,
-                reasons=list(long_conditions.keys()), conditions=long_conditions,
-            )
+        # ---- LONG (EMA uptrend mandatory) ---- #
+        if trend_up:
+            others = {
+                f"rsi {cfg.rsi_long_min}-{cfg.rsi_long_max}": cfg.rsi_long_min <= rsi_val <= cfg.rsi_long_max,
+                f"macd_bull_{macd_mode}": _macd_bullish(df_1h, macd_mode),
+                "obv_rising": _obv_rising(df_1h, cfg.obv_lookback),
+            }
+            if sum(others.values()) >= need_others:
+                conditions = {"ema20>ema50": True, **others}
+                return Signal(
+                    pair=pair, side=LONG, price=price, atr=atr_val, rsi=rsi_val,
+                    reasons=[k for k, v in conditions.items() if v], conditions=conditions,
+                )
 
-        # ---- SHORT ---- #
-        if cfg.allow_short:
-            short_conditions = {
-                "ema20<ema50": bool(trend_down),
+        # ---- SHORT (EMA downtrend mandatory) ---- #
+        if cfg.allow_short and trend_down:
+            others = {
                 f"rsi {cfg.rsi_short_min}-{cfg.rsi_short_max}": cfg.rsi_short_min <= rsi_val <= cfg.rsi_short_max,
                 f"macd_bear_{macd_mode}": _macd_bearish(df_1h, macd_mode),
                 "obv_falling": _obv_falling(df_1h, cfg.obv_lookback),
             }
-            if all(short_conditions.values()):
+            if sum(others.values()) >= need_others:
+                conditions = {"ema20<ema50": True, **others}
                 return Signal(
                     pair=pair, side=SHORT, price=price, atr=atr_val, rsi=rsi_val,
-                    reasons=list(short_conditions.keys()), conditions=short_conditions,
+                    reasons=[k for k, v in conditions.items() if v], conditions=conditions,
                 )
 
         return None
