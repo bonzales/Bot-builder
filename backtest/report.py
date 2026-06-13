@@ -139,6 +139,23 @@ def apply_active_preset(cfg) -> None:
     cfg.risk_per_trade_pct = 0.02   # 2% per trade (vs 1% conservative)
 
 
+def apply_original_preset(cfg) -> None:
+    """
+    The very first strategy, exactly as specified: all FOUR conditions required,
+    MACD *exact* bullish/bearish crossover, RSI 35-50 (long) / 50-65 (short),
+    spot 1x (no leverage). ATR stop + TP1 + breakeven + trailing as in the spec.
+    """
+    cfg.strategy_type = "pullback"
+    cfg.macd_mode = "cross"            # exact crossover, not "momentum state"
+    cfg.rsi_long_min, cfg.rsi_long_max = 35.0, 50.0
+    cfg.rsi_short_min, cfg.rsi_short_max = 50.0, 65.0
+    cfg.min_conditions = 4             # all four
+    cfg.use_margin = False             # spot, 1x — no leverage/short margin
+    cfg.atr_sl_multiplier = 1.5
+    cfg.tp1_pct = 0.03
+    cfg.trailing_step_pct = 0.007
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the setup-phase backtest")
     parser.add_argument("--months", type=int, default=CONFIG.backtest_months)
@@ -148,11 +165,17 @@ def main() -> None:
                         help="HIGH-RISK preset: all-in, fixed 10x leverage, wide stop")
     parser.add_argument("--active", action="store_true",
                         help="More trades (3/4 conditions) + moderate 5x dynamic leverage, 2% risk")
+    parser.add_argument("--original", action="store_true",
+                        help="Original spec: 4 exact conditions, MACD crossover, RSI 35-50, spot 1x")
     parser.add_argument("--strategy", choices=["pullback", "breakout", "ichimoku", "meanrev"],
                         default=None, help="strategy style to backtest")
     parser.add_argument("--data-exchange", default=None,
                         help="venue for historical data (default binance; kraken is limited to ~720 candles)")
     args = parser.parse_args()
+
+    if args.original:
+        apply_original_preset(CONFIG)
+        print("📜 STRATEGIA ORIGINALE: 4 condizioni esatte, MACD crossover, RSI 35-50, spot 1x.\n")
 
     if args.strategy:
         CONFIG.strategy_type = args.strategy
