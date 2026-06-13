@@ -56,6 +56,28 @@ def _macd_bearish_cross(df: pd.DataFrame) -> bool:
     return prev["macd"] >= prev["macd_signal"] and last["macd"] < last["macd_signal"]
 
 
+def _macd_bullish(df: pd.DataFrame, mode: str) -> bool:
+    """
+    MACD confirmation for LONG.
+      * "cross": the exact bullish crossover on the last closed candle (strict).
+      * "state": MACD line above its signal line (bullish regime, looser).
+    The strict "cross" rarely coincides with the other three filters, which is
+    why the default is "state" — it keeps the MACD confirmation while letting
+    the strategy actually trade.
+    """
+    if mode == "cross":
+        return _macd_bullish_cross(df)
+    last = df.iloc[-1]
+    return last["macd"] > last["macd_signal"]
+
+
+def _macd_bearish(df: pd.DataFrame, mode: str) -> bool:
+    if mode == "cross":
+        return _macd_bearish_cross(df)
+    last = df.iloc[-1]
+    return last["macd"] < last["macd_signal"]
+
+
 def _obv_rising(df: pd.DataFrame, lookback: int) -> bool:
     if len(df) < lookback + 1:
         return False
@@ -112,12 +134,13 @@ class Strategy:
 
         trend_up = last["ema_fast"] > last["ema_slow"]
         trend_down = last["ema_fast"] < last["ema_slow"]
+        macd_mode = getattr(cfg, "macd_mode", "state")
 
         # ---- LONG ---- #
         long_conditions = {
             "ema20>ema50": bool(trend_up),
             f"rsi {cfg.rsi_long_min}-{cfg.rsi_long_max}": cfg.rsi_long_min <= rsi_val <= cfg.rsi_long_max,
-            "macd_bull_cross": _macd_bullish_cross(df_1h),
+            f"macd_bull_{macd_mode}": _macd_bullish(df_1h, macd_mode),
             "obv_rising": _obv_rising(df_1h, cfg.obv_lookback),
         }
         if all(long_conditions.values()):
@@ -131,7 +154,7 @@ class Strategy:
             short_conditions = {
                 "ema20<ema50": bool(trend_down),
                 f"rsi {cfg.rsi_short_min}-{cfg.rsi_short_max}": cfg.rsi_short_min <= rsi_val <= cfg.rsi_short_max,
-                "macd_bear_cross": _macd_bearish_cross(df_1h),
+                f"macd_bear_{macd_mode}": _macd_bearish(df_1h, macd_mode),
                 "obv_falling": _obv_falling(df_1h, cfg.obv_lookback),
             }
             if all(short_conditions.values()):

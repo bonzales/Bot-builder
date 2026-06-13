@@ -76,9 +76,13 @@ class Config:
 
     # ----- Strategy thresholds ----- #
     rsi_long_min: float = 35.0
-    rsi_long_max: float = 50.0
+    rsi_long_max: float = 55.0   # widened from 50: an uptrend keeps RSI elevated
     rsi_short_min: float = 50.0
     rsi_short_max: float = 65.0
+    # MACD confirmation mode: "state" (MACD above/below signal — looser, the
+    # strategy actually trades) or "cross" (exact crossover on the last candle —
+    # original spec, but so strict it produced ~2 trades/year in backtest).
+    macd_mode: str = "state"
     volume_spike_mult: float = 3.0      # skip trade if volume > 300% of average
     volume_avg_period: int = 20
     allow_short: bool = True            # SHORT requires margin (see margin section)
@@ -156,6 +160,7 @@ class Config:
             "rsi_period": self.rsi_period,
             "rsi_long_range": [self.rsi_long_min, self.rsi_long_max],
             "rsi_short_range": [self.rsi_short_min, self.rsi_short_max],
+            "macd_mode": self.macd_mode,
             "macd": [self.macd_fast, self.macd_slow, self.macd_signal],
             "atr_period": self.atr_period,
             "atr_sl_multiplier": self.atr_sl_multiplier,

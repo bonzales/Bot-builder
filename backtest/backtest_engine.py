@@ -160,7 +160,9 @@ def optimize(cfg, history: Dict[str, Dict[str, pd.DataFrame]], logger=None) -> L
     Returns a sorted list of {params, metrics} dicts (best first).
     """
     atr_mults = [1.0, 1.5, 2.0]
-    rsi_ranges = [(30, 45), (35, 50), (40, 55)]
+    # Broadened toward higher/wider bands: a strict <=50 cap on the long RSI
+    # almost never coincides with an EMA uptrend, which starved the strategy.
+    rsi_ranges = [(35, 50), (35, 55), (40, 60), (45, 65), (30, 50)]
     tp1_values = [0.02, 0.03, 0.04]
     trailing_steps = [0.005, 0.007, 0.010]
 
