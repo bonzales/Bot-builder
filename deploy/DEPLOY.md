@@ -3,6 +3,19 @@
 Deploy only **after** completing the backtest and the 48h paper-trading run.
 The systemd unit launches the bot in `live` mode and restarts it on crash.
 
+## 0. One-command install (recommended)
+
+On a fresh Ubuntu 24 server, as root, run a single line — it installs
+everything and then prints the remaining steps:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bonzales/Bot-builder/main/deploy/setup.sh | bash
+```
+
+Then just: edit `/opt/trading-bot/.env`, run the backtest + 48h paper trading,
+and finally `systemctl enable --now trading-bot`. The manual steps below are
+the same thing spelled out, if you prefer doing it by hand.
+
 ## 1. System prep
 
 ```bash
