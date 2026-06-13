@@ -111,12 +111,14 @@ class Config:
     margin_rollover_fee: float = 0.0001
     rollover_hours: int = 4
     # Leverage tiers Kraken offers per pair (used to pick the API `leverage`
-    # param). Best-effort defaults; refreshed from the exchange when available.
+    # param). These are only FALLBACK defaults — the bot refreshes them from
+    # the live exchange at startup (DataEngine.refresh_leverage_tiers), since
+    # each market (BTC/EUR, SOL/EUR, ...) has its own max leverage.
     kraken_leverage_tiers: dict = field(
         default_factory=lambda: {
             "BTC/EUR": [2, 3, 4, 5, 10],
             "ETH/EUR": [2, 3, 4, 5],
-            "SOL/EUR": [2, 3],
+            "SOL/EUR": [2, 3, 4, 5, 10],
         }
     )
     default_leverage_tiers: list = field(default_factory=lambda: [2, 3])

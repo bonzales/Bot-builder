@@ -119,3 +119,31 @@ class DataEngine:
             if self.logger:
                 self.logger.warning("Ticker fetch failed for %s: %s", pair, exc)
             return None
+
+    def refresh_leverage_tiers(self, pairs: List[str]) -> Dict[str, list]:
+        """
+        Read the real margin leverage tiers Kraken offers for each pair, so the
+        bot never relies on hard-coded guesses (each market has its own max,
+        e.g. BTC/EUR and SOL/EUR = 10x, SOL/GBP = 3x, some are spot-only).
+
+        Returns { pair: [sorted int tiers] }; pairs with no margin are omitted.
+        Uses the short-side (`leverage_sell`) list as the binding constraint,
+        falling back to the long side.
+        """
+        self._ensure_markets()
+        out: Dict[str, list] = {}
+        for pair in pairs:
+            try:
+                market = self.exchange.market(pair)
+                info = market.get("info", {}) if isinstance(market, dict) else {}
+                sell = info.get("leverage_sell") or []
+                buy = info.get("leverage_buy") or []
+                tiers = sorted({int(float(x)) for x in (sell or buy)})
+                if tiers:
+                    out[pair] = tiers
+                elif self.logger:
+                    self.logger.warning("%s appears to be spot-only (no margin).", pair)
+            except Exception as exc:
+                if self.logger:
+                    self.logger.warning("Leverage tier fetch failed for %s: %s", pair, exc)
+        return out

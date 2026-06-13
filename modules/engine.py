@@ -49,6 +49,21 @@ class TradingEngine:
         self._running = False
         self._daily_alert_sent = False
         self._load_state()
+        self._refresh_leverage_tiers()
+
+    def _refresh_leverage_tiers(self) -> None:
+        """Pull the real per-market margin tiers from Kraken (best-effort)."""
+        if not self.cfg.use_margin:
+            return
+        try:
+            tiers = self.data_engine.refresh_leverage_tiers(self.cfg.pairs)
+            if tiers:
+                self.cfg.kraken_leverage_tiers.update(tiers)
+                self.logger.info("Leverage tiers refreshed from Kraken: %s", tiers)
+        except Exception as exc:
+            self.logger.warning(
+                "Could not refresh leverage tiers (using defaults): %s", exc
+            )
 
     # ================================================================== #
     # State persistence
