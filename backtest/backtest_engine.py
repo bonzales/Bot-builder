@@ -35,6 +35,8 @@ class BacktestResult:
     timestamps: List[pd.Timestamp] = field(default_factory=list)
     final_capital: float = 0.0
     metrics: Dict = field(default_factory=dict)
+    liquidations: int = 0
+    ruined: bool = False          # account hit ~0 (wiped out)
 
 
 def _align_rsi_to_1h(df_1h: pd.DataFrame, df_15m: pd.DataFrame, period: int) -> pd.Series:
@@ -77,6 +79,11 @@ class Backtester:
                 if closed:
                     pos = None
 
+            # Account wiped out? Stop trading — you can't trade with no money.
+            if risk.capital <= 0.01:
+                result.ruined = True
+                break
+
             # 2) Look for a new entry at this bar's close.
             if pos is None and not risk.halted_today and not risk.daily_limit_reached():
                 window = df.iloc[: i + 1]
@@ -103,30 +110,50 @@ class Backtester:
             fill = risk.register_close(pos, float(df.iloc[-1]["close"]), close_time=last_ts.to_pydatetime())
             result.trades.append(self._trade_record(pos, df.iloc[-1]["close"], fill, last_ts))
 
-        result.final_capital = risk.capital
+        result.final_capital = max(0.0, risk.capital)
         result.metrics = compute_metrics(result.trades)
         return result
 
+    def _protective_exit(self, pos: Position, adverse: float):
+        """
+        Whichever protective level the adverse move hits FIRST: the stop loss
+        or (for leveraged margin) the liquidation price. As price moves against
+        the trade it crosses the nearer level first; if the stop sits beyond the
+        liquidation price (e.g. very high leverage or a wide stop), you get
+        liquidated and lose the whole margin. Returns (price, reason) or None.
+        """
+        liq = pos.liquidation_price()
+        levels = [(pos.sl_price, "stop")]
+        if liq is not None:
+            levels.append((liq, "liquidation"))
+        if pos.side == LONG:
+            crossed = [(lvl, name) for lvl, name in levels if adverse <= lvl]
+            if not crossed:
+                return None
+            return max(crossed, key=lambda x: x[0])      # highest = hit first
+        crossed = [(lvl, name) for lvl, name in levels if adverse >= lvl]
+        if not crossed:
+            return None
+        return min(crossed, key=lambda x: x[0])          # lowest = hit first
+
     def _manage(self, risk, pos, adverse, favorable, result, ts) -> bool:
         close_time = ts.to_pydatetime()
-        # Stop check first (pessimistic).
-        actions = risk.evaluate_position(pos, adverse)
-        for action in actions:
-            if action["type"] == "stop_hit":
-                fill = risk.register_close(pos, action["price"], close_time=close_time)
-                result.trades.append(self._trade_record(pos, action["price"], fill, ts))
-                return True
-            if action["type"] == "tp1":
-                risk.register_partial_close(pos, action["price"], action["close_fraction"], close_time=close_time)
-        # Favorable extreme: TP1 / trailing.
+        # Protective exit on the adverse extreme: stop loss OR liquidation.
+        hit = self._protective_exit(pos, adverse)
+        if hit:
+            price, reason = hit
+            fill = risk.register_close(pos, price, close_time=close_time)
+            rec = self._trade_record(pos, price, fill, ts)
+            rec["exit_reason"] = reason
+            result.trades.append(rec)
+            if reason == "liquidation":
+                result.liquidations += 1
+            return True
+        # Favorable extreme: TP1 partial close + trailing-stop ratchet.
         actions = risk.evaluate_position(pos, favorable)
         for action in actions:
             if action["type"] == "tp1":
                 risk.register_partial_close(pos, action["price"], action["close_fraction"], close_time=close_time)
-            elif action["type"] == "stop_hit":
-                fill = risk.register_close(pos, action["price"], close_time=close_time)
-                result.trades.append(self._trade_record(pos, action["price"], fill, ts))
-                return True
         return False
 
     def _trade_record(self, pos: Position, exit_price: float, fill: Dict, ts) -> Dict:

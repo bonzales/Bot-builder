@@ -89,6 +89,19 @@ class Position:
     def notional(self) -> float:
         return self.quantity * self.entry_price
 
+    def liquidation_price(self) -> Optional[float]:
+        """
+        Approximate liquidation price for a leveraged margin position: the
+        adverse move (~1/leverage) that wipes out the posted margin. Spot /
+        unleveraged positions cannot be liquidated. Maintenance margin is
+        ignored (slightly optimistic), which is fine for illustrating risk.
+        """
+        if not self.is_margin or self.leverage <= 1:
+            return None
+        if self.side == LONG:
+            return self.entry_price * (1 - 1.0 / self.leverage)
+        return self.entry_price * (1 + 1.0 / self.leverage)
+
     def to_dict(self) -> Dict:
         return {
             "id": self.id,
