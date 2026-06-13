@@ -123,6 +123,9 @@ def add_all_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     out["atr"] = atr(out, cfg.atr_period)
     out["obv"] = obv(out)
     out["vol_avg"] = out["volume"].rolling(cfg.volume_avg_period).mean()
+    # RSI on this (1h) timeframe + short volume average, for mean-reversion.
+    out["rsi"] = rsi(out["close"], cfg.rsi_period)
+    out["vol_avg6"] = out["volume"].rolling(getattr(cfg, "meanrev_vol_lookback", 6)).mean()
 
     # Breakout (Donchian) channel
     out["donchian_high"], out["donchian_low"] = donchian(

@@ -148,7 +148,7 @@ def main() -> None:
                         help="HIGH-RISK preset: all-in, fixed 10x leverage, wide stop")
     parser.add_argument("--active", action="store_true",
                         help="More trades (3/4 conditions) + moderate 5x dynamic leverage, 2% risk")
-    parser.add_argument("--strategy", choices=["pullback", "breakout", "ichimoku"],
+    parser.add_argument("--strategy", choices=["pullback", "breakout", "ichimoku", "meanrev"],
                         default=None, help="strategy style to backtest")
     args = parser.parse_args()
 

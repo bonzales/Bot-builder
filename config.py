@@ -91,8 +91,15 @@ class Config:
     # 4 = strict; 3 = looser -> more frequent trades.
     min_conditions: int = 4
     # Strategy style: "pullback" (EMA+RSI+MACD+OBV, default), "breakout"
-    # (Donchian trend-following) or "ichimoku".
+    # (Donchian trend-following), "ichimoku" or "meanrev" (oversold bounce).
     strategy_type: str = "pullback"
+    # Mean-reversion entry (oversold bounce): RSI(14) < max, MACD bullish cross,
+    # and volume > (1 + vol_increase) * average of the last N candles. Exits use
+    # the same dynamic ATR stop + TP1 + breakeven + trailing as the others
+    # (let profits run) — no fixed % brackets.
+    meanrev_rsi_max: float = 32.0
+    meanrev_vol_increase: float = 0.25
+    meanrev_vol_lookback: int = 6
     breakout_trend_filter: bool = True
     donchian_period: int = 20
     ichimoku_tenkan: int = 9
