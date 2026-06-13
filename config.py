@@ -58,7 +58,11 @@ class Config:
     initial_capital: float = 100.0
 
     # ----- Data engine ----- #
-    pairs: List[str] = field(default_factory=lambda: ["BTC/EUR", "ETH/EUR", "SOL/EUR"])
+    # Broader basket of liquid EUR pairs with Kraken margin, for the
+    # exploration backtest. Trim to the best performers before going live.
+    pairs: List[str] = field(default_factory=lambda: [
+        "BTC/EUR", "ETH/EUR", "SOL/EUR", "XRP/EUR", "ADA/EUR", "DOT/EUR",
+    ])
     primary_timeframe: str = "1h"       # trend / EMA / MACD / ATR / OBV
     secondary_timeframe: str = "15m"    # RSI timing
     candle_lookback: int = 300          # candles to keep in memory per pair
