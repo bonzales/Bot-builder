@@ -87,6 +87,9 @@ class Config:
     # strategy actually trades) or "cross" (exact crossover on the last candle —
     # original spec, but so strict it produced ~2 trades/year in backtest).
     macd_mode: str = "state"
+    # How many of the 4 entry conditions must hold (EMA trend always mandatory).
+    # 4 = strict; 3 = looser -> more frequent trades.
+    min_conditions: int = 4
     volume_spike_mult: float = 3.0      # skip trade if volume > 300% of average
     volume_avg_period: int = 20
     allow_short: bool = True            # SHORT requires margin (see margin section)

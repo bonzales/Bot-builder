@@ -125,6 +125,20 @@ def apply_aggressive_preset(cfg) -> None:
     cfg.daily_loss_limit_pct = 1.0  # effectively off, so we see the full picture
 
 
+def apply_active_preset(cfg) -> None:
+    """
+    More active middle-ground preset: looser entries (3 of 4 conditions) for
+    more frequent trades, moderate leverage capped at 5x (still risk-based and
+    dynamic), and a slightly higher 2% risk per trade. Normal sizing (33%, up
+    to 3 concurrent) and the protective stop stay in place.
+    """
+    cfg.min_conditions = 3          # 3 of 4 -> more trades
+    cfg.use_margin = True
+    cfg.dynamic_leverage = True
+    cfg.max_leverage = 5.0
+    cfg.risk_per_trade_pct = 0.02   # 2% per trade (vs 1% conservative)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the setup-phase backtest")
     parser.add_argument("--months", type=int, default=CONFIG.backtest_months)
@@ -132,12 +146,17 @@ def main() -> None:
     parser.add_argument("--no-cache", action="store_true", help="force re-download of history")
     parser.add_argument("--aggressive", action="store_true",
                         help="HIGH-RISK preset: all-in, fixed 10x leverage, wide stop")
+    parser.add_argument("--active", action="store_true",
+                        help="More trades (3/4 conditions) + moderate 5x dynamic leverage, 2% risk")
     args = parser.parse_args()
 
     if args.aggressive:
         apply_aggressive_preset(CONFIG)
         print("⚠️  MODALITÀ AGGRESSIVA: tutto il capitale, leva 10x fissa, stop largo.")
         print("    Backtest a scopo dimostrativo — rischio di azzerare il conto.\n")
+    elif args.active:
+        apply_active_preset(CONFIG)
+        print("⚙️  MODALITÀ ATTIVA: 3/4 condizioni, leva dinamica max 5x, rischio 2%.\n")
 
     logger = TradingLogger(CONFIG.log_dir, "backtest.log", "backtest_trades.jsonl")
     logger.info("Fetching %d months of history for %s …", args.months, CONFIG.pairs)
