@@ -21,7 +21,7 @@ from config import CONFIG
 from modules.logger import TradingLogger
 from modules.reporting import compute_metrics
 
-from .backtest_engine import Backtester, BacktestResult, optimize
+from .backtest_engine import Backtester, BacktestResult, optimize, walk_forward
 from .data_fetcher import fetch_history
 
 REPORT_DIR = os.path.join(os.path.dirname(__file__), "reports")
@@ -139,6 +139,44 @@ def apply_active_preset(cfg) -> None:
     cfg.risk_per_trade_pct = 0.02   # 2% per trade (vs 1% conservative)
 
 
+def render_walkforward(wf: dict) -> str:
+    p = wf["params"]
+    ins = wf["in_sample"]
+    oos = wf["out_of_sample"]
+
+    def block(title, m):
+        return (
+            f"{title}\n"
+            f"  Trade: {m['trades']} | Win: {m['win_rate']:.0%} | "
+            f"PF: {_fmt_pf(m['profit_factor'])} | Net: {m['net_total']:+.2f}€"
+        )
+
+    oos_pf = oos["profit_factor"]
+    oos_net = oos["net_total"]
+    edge_real = (oos_pf > 1.0 and oos_net > 0 and oos["trades"] >= 10)
+    verdict = (
+        "✅ Regge anche fuori campione — potrebbe esserci un edge reale (da confermare con altri dati)."
+        if edge_real else
+        "❌ NON regge sui dati mai visti → era OVERFITTING. Da scartare."
+    )
+
+    return "\n".join([
+        "=" * 60,
+        "WALK-FORWARD — VALIDAZIONE FUORI CAMPIONE",
+        "=" * 60,
+        f"Parametri scelti sul training: ATR×{p['atr_sl_multiplier']} | "
+        f"RSI{p['rsi_long_range']} | TP1={p['tp1_pct']:.0%} | step={p['trailing_step_pct']:.1%}",
+        "",
+        block("IN-SAMPLE (dati usati per ottimizzare):", ins),
+        "",
+        block("OUT-OF-SAMPLE (dati MAI visti):", oos),
+        "",
+        "-" * 60,
+        verdict,
+        "=" * 60,
+    ])
+
+
 def apply_original_preset(cfg) -> None:
     """
     The very first strategy, exactly as specified: all FOUR conditions required,
@@ -171,6 +209,10 @@ def main() -> None:
                         default=None, help="strategy style to backtest")
     parser.add_argument("--data-exchange", default=None,
                         help="venue for historical data (default binance; kraken is limited to ~720 candles)")
+    parser.add_argument("--walkforward", action="store_true",
+                        help="out-of-sample test: optimize on first 2/3, validate on unseen last 1/3")
+    parser.add_argument("--train-frac", type=float, default=0.67,
+                        help="fraction of data used for in-sample optimization (default 0.67)")
     args = parser.parse_args()
 
     if args.original:
@@ -193,6 +235,14 @@ def main() -> None:
     logger.info("Fetching %d months of history for %s …", args.months, CONFIG.pairs)
     history = fetch_history(CONFIG, months=args.months, logger=logger,
                             use_cache=not args.no_cache, data_exchange=args.data_exchange)
+
+    if args.walkforward:
+        print("\n🔬 VALIDAZIONE FUORI CAMPIONE (walk-forward)…")
+        print(f"   Ottimizzo sui primi {args.train_frac*100:.0f}% dei dati, "
+              f"poi testo sul {(1-args.train_frac)*100:.0f}% MAI VISTO.\n")
+        wf = walk_forward(CONFIG, history, logger=logger, train_frac=args.train_frac)
+        print(render_walkforward(wf))
+        return
 
     bt = Backtester(CONFIG)
     results = bt.run_all(history)
