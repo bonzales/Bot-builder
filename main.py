@@ -54,10 +54,36 @@ def main() -> None:
         default=CONFIG.mode if CONFIG.mode in (Mode.PAPER, Mode.LIVE) else Mode.PAPER,
         help="paper (default, simulated) or live (real orders)",
     )
+    # Optional runtime overrides (handy for experiments in paper mode).
+    parser.add_argument("--pairs", default=None,
+                        help="comma-separated pairs override, e.g. 'SOL/EUR'")
+    parser.add_argument("--max-leverage", type=float, default=None,
+                        help="cap on dynamic leverage, e.g. 5")
+    parser.add_argument("--risk", type=float, default=None,
+                        help="risk per trade as a fraction, e.g. 0.03 for 3%%")
+    parser.add_argument("--min-conditions", type=int, default=None,
+                        help="entry conditions required (4 strict, 3 looser)")
+    parser.add_argument("--strategy",
+                        choices=["pullback", "breakout", "ichimoku", "meanrev"],
+                        default=None, help="strategy style")
     args = parser.parse_args()
+
+    if args.pairs:
+        CONFIG.pairs = [p.strip() for p in args.pairs.split(",") if p.strip()]
+    if args.max_leverage is not None:
+        CONFIG.max_leverage = args.max_leverage
+    if args.risk is not None:
+        CONFIG.risk_per_trade_pct = args.risk
+    if args.min_conditions is not None:
+        CONFIG.min_conditions = args.min_conditions
+    if args.strategy:
+        CONFIG.strategy_type = args.strategy
 
     if args.mode == Mode.LIVE:
         print("⚠️  Starting in LIVE mode — real orders will be placed on Kraken.")
+    print(f"Pairs={CONFIG.pairs} | strategy={CONFIG.strategy_type} | "
+          f"max_leverage={CONFIG.max_leverage}x | risk/trade={CONFIG.risk_per_trade_pct:.0%} | "
+          f"min_conditions={CONFIG.min_conditions}")
     engine = build_engine(args.mode)
     try:
         engine.run_forever()
