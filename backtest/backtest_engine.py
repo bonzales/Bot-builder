@@ -235,3 +235,57 @@ def optimize(cfg, history: Dict[str, Dict[str, pd.DataFrame]], logger=None) -> L
 
     combos.sort(key=lambda c: (c["metrics"]["net_total"], c["metrics"]["profit_factor"]), reverse=True)
     return combos
+
+
+def _apply_params(cfg, params: Dict):
+    trial = copy.deepcopy(cfg)
+    trial.atr_sl_multiplier = params["atr_sl_multiplier"]
+    trial.rsi_long_min, trial.rsi_long_max = params["rsi_long_range"]
+    trial.tp1_pct = params["tp1_pct"]
+    trial.trailing_step_pct = params["trailing_step_pct"]
+    return trial
+
+
+def _split_history(history: Dict[str, Dict[str, pd.DataFrame]], train_frac: float,
+                   overlap: int = 150):
+    """Split each series chronologically into train / test (test keeps an
+    indicator warm-up overlap from the end of train so it can trade from the
+    real split point)."""
+    train: Dict[str, Dict[str, pd.DataFrame]] = {}
+    test: Dict[str, Dict[str, pd.DataFrame]] = {}
+    for pair, frames in history.items():
+        train[pair], test[pair] = {}, {}
+        for tf, df in frames.items():
+            n = len(df)
+            split = int(n * train_frac)
+            train[pair][tf] = df.iloc[:split].reset_index(drop=True)
+            start = max(0, split - overlap)
+            test[pair][tf] = df.iloc[start:].reset_index(drop=True)
+    return train, test
+
+
+def walk_forward(cfg, history, logger=None, train_frac: float = 0.67) -> Dict:
+    """
+    Out-of-sample validation: optimize parameters on the first `train_frac` of
+    the data, then evaluate the single best combo on the held-out remainder
+    that was never used for tuning. Returns in-sample vs out-of-sample metrics
+    so overfitting is obvious.
+    """
+    train_hist, test_hist = _split_history(history, train_frac)
+    if logger:
+        logger.info("Walk-forward: optimizing on first %.0f%% of data…", train_frac * 100)
+    combos = optimize(cfg, train_hist, logger=logger)
+    best = combos[0]
+
+    trial = _apply_params(cfg, best["params"])
+    test_results = Backtester(trial).run_all(test_hist)
+    test_trades: List[Dict] = []
+    for r in test_results.values():
+        test_trades.extend(r.trades)
+    oos_metrics = compute_metrics(test_trades)
+    return {
+        "params": best["params"],
+        "in_sample": best["metrics"],
+        "out_of_sample": oos_metrics,
+        "test_results": test_results,
+    }
